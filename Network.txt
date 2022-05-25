@@ -1,0 +1,59 @@
+ipv6
+
+osi七层模型
+	应用层 		HTTP DHCP
+	表示层
+	会话层
+	传输层		ping，TPC，UDP 端到端
+	网络层		ip，路由器，点到点
+	数据链路层  mac，交换机
+	物理层
+	
+ping过程
+	https://blog.csdn.net/dwj_daiwenjie/article/details/103953494
+	PC
+		arp表，维护ip和mac对应关系
+		目的IP和源IP比较，是否同一个子网，若是，则封装目的mac（同意子网肯定可以arp获取对方mac）发送；若否，则发送默认网关，目的mac封装网关mac，由网关进行转发
+		
+	交换机
+		mac表，维护mac和接口的关系
+		已知单播走单播，未知单播走广播，不断学习更新mac表
+		
+	路由器
+		arp表
+		路由器每个端口都有独立mac
+		路由表，维护子网ip、下一跳、接口的关系。路由器通过路由表中的下一跳必定知道目的子网需要转发的端口，否则返回路由不可达
+
+
+vlan
+	virtual local area network
+	vlan内广播
+	
+	
+udp  user datagram protocal
+	DNS(53) BOOTP(67 68) SNMP(61) TFPT(69)
+	面向报文，不可靠传输，没有建链，可靠性靠应用层保证，可以单播，多播，广播
+	报文头只有8字节，开销较小
+	源端口2byte，目的端口2byte，长度2byte，校验和2byte
+
+tcp transmission control protocol
+	HTTP（80） SMTP FTP Telnet（23）
+	面向字节流，报文分片，传输前先建链，报文头比较长，20-60字节
+	协议头至少20字节
+		源端口2byte 目的端口2byte
+		序号4byte
+		确认号4byte
+		头长度4bit 空闲4bit 一堆标记位8bit 接收窗口2byte
+		检验和2byte  紧急指针2byte
+		后续选项不定长
+		
+	建链三次握手：syn   syn ack   ack
+	断链四次挥手: fin ack fin ack
+	拥塞控制，滑动窗口：
+		初始窗口大小较小，每次扩大至两倍，指数级增长
+		发生拥塞后，窗口减小至1字节，再以两倍指数级增长，直到上次发生拥塞的窗口的一半，开始线性增长
+
+dpdk
+
+ovs
+	open virtual switch
