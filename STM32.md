@@ -31,6 +31,8 @@
 ## gcc-arm-none-eabi -- 编译工具链
 
 - 下载 sudo apt install gcc-arm-none-eabi
+- apt源下载的可能不是最新，因此使用官网下载https://developer.arm.com/open-source/gnu-toolchain/gnu-rm/downloads
+- 官网下载解压后，设置包含到PATH，vi ~/.bashrc, export PATH=$PATH:/home/Lancer/arm-none-eabi-gcc/bin
 - https://blog.csdn.net/ybhuangfugui/article/details/98136988
 - 使用arm-none-eabi-gcc工具来进行编译，类比于PC环境下的gcc
 
@@ -97,24 +99,144 @@
 
 ## 工程目录组织
 
-├── Libraries
-│   ├── inc
-│   └── src
-├── Start
-│   ├── core_cm3.c
-│   ├── core_cm3.h
-│   ├── startup_stm32f10x_hd.s
-│   ├── stm32f10x.h
-│   ├── system_stm32f10x.c
-│   └── system_stm32f10x.h
-├── User
-│   ├── main.c
-│   ├── stm32f10x_conf.h
-│   ├── stm32f10x_it.c
-│   └── stm32f10x_it.h
-└── makefile
+```shell
+Lancer@Lancer-PC:~/Documents/Codes/stm32/demo$ tree  -L 2
+.
+├── Libraries # 标准外设库文件，从STM32F10x_StdPeriph_Lib_V3.6.0/Libraries/STM32F10x_StdPeriph_Driver下拷贝
+│   ├── inc
+│   └── src
+├── Makefile
+├── Start # 启动相关文件
+│   ├── core_cm3.c # 内核文件，从STM32F10x_StdPeriph_Lib_V3.6.0/Libraries/CMSIS/CM3/CoreSupport拷贝
+│   ├── core_cm3.h
+│   ├── startup_stm32f10x_hd.s # 启动汇编文件，STM32F10x_StdPeriph_Lib_V3.6.0/Libraries/CMSIS/CM3/DeviceSupport/ST/STM32F10x/startup/TrueSTUDIO中拷贝，当前芯片适用于hd
+│   ├── stm32f10x.h
+│   ├── system_stm32f10x.c #STM32F10x_StdPeriph_Lib_V3.6.0/Libraries/CMSIS/CM3/DeviceSupport/ST/STM32F10x
+│   └── system_stm32f10x.h
+├── stm32_flash.ld # 链接脚本，从STM32F10x_StdPeriph_Lib_V3.6.0/Project/STM32F10x_StdPeriph_Template/TrueSTUDIO/STM3210E-EVAL拷贝，注意对应文件夹是STM3210E-EVAL，文件注释描述Linker script for STM32F103ZE Device with512KByte FLASH, 64KByte RAM
+└── User # 用户App层文件
+    ├── main.c # 定义用户App层函数入口main
+    ├── stm32f10x_conf.h # 使用外设标准库的总头文件，main中不需要直接include，只需要include stm32f10x_it.h
+    ├── stm32f10x_it.c
+    └── stm32f10x_it.h # 在该文件中根据宏USE_STDPERIPH_DRIVER来include stm32f10x_conf.h，因此需要使用标准外设库时，在Makefile中加入编译选项-D USE_STDPERIPH_DRIVER
 
-5 directories, 11 files
+5 directories, 12 files
+```
+
+## Makefile示例
+
+```makefile
+# 生成的文件名<项目名>
+PROJECT = demo
+
+# 定义文件格式和文件名
+TARGET := $(PROJECT)
+TARGET_ELF := $(TARGET).elf
+TARGET_BIN := $(TARGET).bin
+TARGET_HEX := $(TARGET).hex
+OBJCPFLAGS_ELF_TO_BIN = -Obinary
+OBJCPFLAGS_ELF_TO_HEX = -Oihex
+OBJCPFLAGS_BIN_TO_HEX = -Ibinary -Oihex
+
+# 定义路径
+TOP_DIR = .
+REAL_DIR = $(realpath $(TOP_DIR)) #获取绝对路径，用于openocd烧写
+SCRIPT_DIR := $(TOP_DIR)/scripts
+STARTUP_DIR := $(TOP_DIR)/Start
+INC_DIR := -I$(TOP_DIR)/User -I$(TOP_DIR)/Start -I$(TOP_DIR)/Libraries/inc
+
+# openocd烧写相关路径
+OPENOCD_INTER = /usr/share/openocd/scripts/interface/stlink-v2.cfg
+OPENOCD_TARGET = /usr/share/openocd/scripts/target/stm32f1x.cfg
+FLASH_OFFSET = 0x08000000 # flash偏移量，stm32_flash.ld中指定，在openocd写入hex到flash时偏移
+
+# 设置ld链接脚本文件
+LDSCRIPT := $(TOP_DIR)/stm32_flash.ld
+
+# 定义编译工具
+CC = arm-none-eabi-gcc
+AS = arm-none-eabi-as
+LD = arm-none-eabi-ld
+AR = arm-none-eabi-ar
+OBJCP = arm-none-eabi-objcopy
+
+# 链接文件
+LIBS = -lc -lm -lnosys 
+LIBDIR = 
+
+# CPU架构，用于编译选项
+CPU = -mcpu=cortex-m3
+MCU = -mthumb $(CPU)
+
+# .s汇编文件编译选项
+ASFLAGS += $(MCU)
+
+# .c文件编译选项
+CCFLAGS += $(MCU) -Wall -g -mfloat-abi=soft -march=armv7-m -specs=nosys.specs
+CCFLAGS += $(INC_DIR)
+CCFLAGS += -D STM32F10X_HD -D USE_STDPERIPH_DRIVER
+
+# 链接选项
+LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(TOP_DIR)/$(TARGET).map,--cref -Wl,--gc-sections
+
+# .s汇编启动文件
+ASM_SRC += $(STARTUP_DIR)/startup_stm32f10x_hd.s
+
+# .c源文件，即当前目录所有.c文件
+C_SRC = $(shell find ./ -name '*.c')
+
+# 替换文件后缀
+C_OBJS := $(C_SRC:%.c=%.o)
+ASM_OBJS := $(ASM_SRC:%.s=%.o)
+
+# 编译命令的定义
+COMPILE = $(CC) $(CCFLAGS) -c $< -o $@ 
+ASSEMBLE = $(AS) $(ASFLAGS) -c $< -o $@ 
+LINK = $(CC) $+ $(LDFLAGS) $(LDLIBS) -o $@ 
+ELF_TO_BIN = $(OBJCP) $(OBJCPFLAGS_ELF_TO_BIN) $< $@
+BIN_TO_HEX = $(OBJCP) $(OBJCPFLAGS_BIN_TO_HEX) $< $@ 
+
+# 定义伪目标
+.PHONY: all clean printf download
+
+# 定义规则
+all: $(TARGET_HEX)
+	@echo "build done"
+
+$(TARGET_HEX): $(TARGET_BIN)
+	$(BIN_TO_HEX)
+
+$(TARGET_BIN): $(TARGET_ELF)
+	$(ELF_TO_BIN)
+
+$(TARGET_ELF): $(C_OBJS) $(ASM_OBJS)
+	$(LINK)
+
+$(C_OBJS): %.o:%.c
+	$(COMPILE)
+
+$(ASM_OBJS): %.o:%.s
+	$(ASSEMBLE) 
+
+printf:
+	@echo $(ASM_OBJS)
+	@echo $(ASSEMBLE)
+
+# 清理项
+clean:
+	rm -f $(TARGET_HEX)
+	rm -f $(TARGET_BIN)
+	rm -f $(TARGET_ELF)
+	rm -f $(C_OBJS) $(ASM_OBJS)
+	rm -f $(TARGET).map
+	@echo "clean done"
+
+# openocd下载
+download:
+	openocd -f $(OPENOCD_INTER) -f $(OPENOCD_TARGET) -c init -c halt -c "flash write_image erase $(REAL_DIR)/$(TARGET).hex $(FLASH_OFFSET)" -c reset -c shutdown
+```
+
+
 
 ## OpenOCD -- 烧写工具
 
