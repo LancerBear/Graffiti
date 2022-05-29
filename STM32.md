@@ -306,3 +306,74 @@ download:
   # 注意flash write_image erase带引号
   # 可以考虑将上述命令写入makefile，可以直接make download一键下载
   ```
+
+# GPIO
+
+- 所有GPIO，A～G都挂接在APB2上，因此使用前需要初始化APB2外设时钟 
+
+  ```c
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOx, ENABLE);
+  ```
+
+- GPIO_InitTypeDef结构体进行GPIO口配置
+
+  ```c
+  GPIO_InitTypeDef gpioTypefDef;
+  gpioTypefDef.GPIO_Pin = GPIO_Pin_5 | GPIO_Pin_4;
+  gpioTypefDef.GPIO_Speed = GPIO_Speed_50MHz;
+  gpioTypefDef.GPIO_Mode = GPIO_Mode_Out_PP; // Push Pull推挽输出
+  
+  GPIO_Init(GPIOB, &gpioTypefDef);
+  ```
+
+- 输出
+
+  ```c
+  void GPIO_SetBits(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
+  void GPIO_ResetBits(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
+  ```
+
+- 输入
+
+  ```c
+  uint8_t GPIO_ReadInputDataBit(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
+  uint16_t GPIO_ReadInputData(GPIO_TypeDef* GPIOx);
+  uint8_t GPIO_ReadOutputDataBit(GPIO_TypeDef* GPIOx, uint16_t GPIO_Pin);
+  uint16_t GPIO_ReadOutputData(GPIO_TypeDef* GPIOx);
+  ```
+
+  
+
+| IO模式       | 性质     | 特征                                               | 备注                                                         |
+| ------------ | -------- | :------------------------------------------------- | ------------------------------------------------------------ |
+| 浮空输入     | 数字输入 | 如果引脚悬空，则高低电平不确定                     | 由于悬空不确定，因此使用时一般需要外接驱动电路，比如外接下拉电阻 |
+| 上拉输入     | 数字输入 | 如果引脚悬空，由于内部上拉电阻，默认高电平         | 用作按键输入时，配合电路按键接GND                            |
+| 下拉输入     | 数字输入 | 如果引脚悬空，由于内部下拉电阻，默认低电平         |                                                              |
+| 模拟输入     | 模拟输入 | GPIO无效，引脚直接接入内部ADC                      | 用于ADC                                                      |
+| 开漏输出     | 数字输出 | 高电平是高阻态，没有驱动能力，低电平接入VSS        | 高点平                                                       |
+| 推挽输出     | 数字输出 | 高电平VDD，低电平VSS                               | 一般数字输出常用推挽输出模式                                 |
+| 复用开漏输出 | 数字输出 | 区别于开漏输出，复用开漏输出高低电平由片上外设控制 |                                                              |
+| 复用推挽输出 | 数字输出 | 区别于推挽输出，复用推挽输出高低电平由片上外设控制 |                                                              |
+
+# 中断
+
+- 最多68个中断通道，包含EXTI外部中断、TIM时钟中断、ADC、USART串口中断、SPI、I2C、RTC实时时钟中断
+- 使用NVIC嵌套向量中断控制器对中断进行控制，NVIC是内核外设，连接到CPU接口，用于集中控制管理中断信号，从而不需要CPU对中断进行直接控制而影响CPU执行效率
+- 对于每个通道，使用优先级寄存器的4位表示，共同16个可编程的优先级，0优先级最高。4位中高n位表示抢占优先级，低4 - n位表示响应优先级
+- 抢占优先级高可以进行中断嵌套，响应优先级高可以优先排队，对于二者都相同的中断，按照中断号排队，中断号参考中断向量表
+
+## EXTI(External Interrupt)外部中断
+
+- 可以监测GPIO口的电平变化，变化后向NVIC发出中断请求，NVIC裁决后触发CPU中断
+
+- 支持所有GPIO 口，但是相同的Pin不可以同时触发，例如GPIOA_Pin2 、GPIOG_Pin_2，原因在于所有GPIO口先是通过AFIO中断引脚选择器之后再接入EXTI外部中断控制器，而相同的Pin实际在AFIO中共享一条线路
+
+  ![image-20220529153015740](STM32.assets/image-20220529153015740.png)
+
+- EXTI支持上升沿、下降沿、双边沿、软件（即使硬件电平不变化，跑到对应的软件代码也可以触发）触发方式
+
+- 响应方式除了常规的CPU跳转执行中断程序的中断响应外，还可以是事件响应，即直接触发一个事件，让其他外设完成响应的工作，如ADC等。个人理解设计初衷在于，不需要在CPU中断程序中手动调用其他外设完成相应的事件，而是直接使用硬件电路完成对其他外设的调用，便于开发以及获得更优的执行效率
+
+- 按键监测不建议直接使用EXTI，因为无法处理抖动。建议使用定时器中断读取
+
+- EXTI通道除了包含GPIO外，还包含PVD、RTC闹钟、USB唤醒、ETH唤醒中断，用于唤醒STM32
