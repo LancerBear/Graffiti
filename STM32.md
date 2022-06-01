@@ -377,3 +377,57 @@ download:
 - 按键监测不建议直接使用EXTI，因为无法处理抖动。建议使用定时器中断读取
 
 - EXTI通道除了包含GPIO外，还包含PVD、RTC闹钟、USB唤醒、ETH唤醒中断，用于唤醒STM32
+
+  ```c
+  /****************************************************************************************************
+  初始化流程，从上图可知整体流程经过GPIO、AFIO、EXTI、NVIC，因此初始化流程也会涉及上述几个模块
+  ****************************************************************************************************/
+  // GPIO，假设使用GPIOB_Pin_14
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE); // 使能ABP2的时钟，因为GPIO挂接在APB2总线上
+  GPIO_InitTypeDef GPIO_InitStructure;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_14;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+  GPIO_Init(GPIOB, &GPIO_InitStructure);
+  
+  // AFIO，数据选择器控制哪一路GPIO引脚到达EXTI
+  RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO, ENABLE); // AFIO同样挂接在ABP2总线，同样需要使能时钟
+  GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource14); // 配置AFIO数据选择器，此处配置GPIOB14为中断源
+  
+  // EXTI
+  EXTI_InitTypeDef EXTI_InitStructure;
+  EXTI_InitStructure.EXTI_Line = EXTI_Line14;
+  EXTI_InitStructure.EXTI_LineCmd = ENABLE;
+  EXTI_InitStructure.EXTI_Mode = EXTI_Mode_Interrupt; // 中断响应，可选EXTI_Mode_Event事件响应
+  EXTI_InitStructure.EXTI_Trigger = EXTI_Trigger_Falling; // 下降沿触发
+  EXTI_Init(&EXTI_InitStructure);EXTI(External Interrupt)外部中断
+  
+  // NVIC
+  NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2); // 中断分组，即上述的抢占优先级和响应优先级，根据4bit分组，此处使用NVIC_PriorityGroup2,即2bit用于抢占优先级，剩下2bit用于响应优先级，此时两种优先级都是0-3总共4级。
+  // 且注意整个芯片中的NVIC分组方式只能使用一种，因此一般该函数只会调用一次，不应该放入某个模块的初始化中，避免多次调用传参分组方式不一致的情况
+  
+  NVIC_InitTypeDef NVIC_InitStructure;
+  NVIC_InitStructure.NVIC_IRQChannel = EXTI15_10_IRQn; // 中断通道，EXTI10-15共用一个中断通道
+  NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE; // 使能中断通道
+  NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 1; // preemption抢占优先级，注意优先级分组，由于选择了NVIC_PriorityGroup_2，两种优先级范围都是0-3
+  NVIC_InitStructure.NVIC_IRQChannelSubPriority = 1; // subpriority响应优先级
+  NVIC_Init(&NVIC_InitStructure);
+  
+  ```
+
+  ```c
+  /****************************************************************************************************中断处理函数，在startup_stm32f10x_hd.s启动文件中，写明了中断向量表，找到对应EXTI中断通道的函数名，实现该函数，由于此处用了GPIOB_Pin_14，10-15Pin共用一个中断通道，函数是EXTI15_10_IRQHandler
+  ****************************************************************************************************/
+  // 中断处理固定格式，void参数，返回值void
+  void EXTI15_10_IRQHandler(void)
+  {
+      // 由于10-15共用中断通道，进入中断后需要判断一下触发中断是哪一路信号，通过中断标记位判断
+      if (EXTI_GetITStatus(EXTI_Line14) == SET)
+  	{
+          /* do something 进行业务对应的中断处理*/
+          
+  		EXTI_ClearITPendingBit(EXTI_Line14); // 处理完后清除中断标记位，否则一直触发中断
+  	}
+  }
+  ```
+
